@@ -1,6 +1,6 @@
 # ISP Scrubbing Validation Tool
 
-A Python async load testing tool for validating ISP scrubbing center performance under controlled, authorized traffic ramp-up.
+A Python async load testing tool for validating ISP scrubbing center performance under controlled, authorized traffic ramp-up. Includes both a CLI mode and a browser-based live dashboard with real-time charts.
 
 > **Authorized use only.** Run this tool only against infrastructure you own or have explicit written permission to test.
 
@@ -10,7 +10,7 @@ A Python async load testing tool for validating ISP scrubbing center performance
 
 - Python 3.8+
 - Ubuntu/Debian Linux (or any OS with Python 3)
-- Root or sudo access (for monitoring tools)
+- Root or sudo access (for system-level monitoring tools)
 
 ---
 
@@ -32,8 +32,8 @@ sudo bash setup.py
 
 This installs:
 - `python3`, `python3-pip`
-- `htop`, `iftop`, `net-tools`, `curl` (for live monitoring)
-- `aiohttp` Python package
+- `htop`, `iftop`, `net-tools`, `curl` (for terminal monitoring)
+- Python packages: `aiohttp`, `fastapi`, `uvicorn`
 
 ### 3. Manual install (alternative)
 
@@ -50,7 +50,7 @@ This tool must only be used when:
 - You **own** the target infrastructure, or
 - You have **explicit written authorization** from the target owner
 
-Every HTTP request sent by this tool includes the following headers to identify it as authorized testing traffic:
+Every HTTP request includes the following headers to identify it as authorized testing traffic:
 
 ```
 User-Agent: Authorized-ISP-Scrubbing-Validation
@@ -62,13 +62,41 @@ Unauthorized use against third-party systems is illegal and unethical.
 
 ---
 
-## First Run
+## Running — Web Dashboard (recommended)
+
+Launch the web server:
+
+```bash
+python server.py
+```
+
+Then open **http://localhost:8000** in your browser.
+
+The dashboard provides:
+
+- **Configuration form** — fill in all test parameters and click Start
+- **Live KPI cards** — RPS, error rate, and p99 latency updating every 2 seconds during a stage
+- **4 real-time charts** — updated after each stage completes:
+  - Requests per second (RPS) per stage
+  - Latency — avg, p95, p99 per stage
+  - Concurrent users ramp
+  - Request breakdown — success vs errors vs timeouts (stacked)
+- **Live log panel** — timestamped stream of test events
+- **Reports section** — lists all saved JSON reports with one-click download
+
+The server streams updates over WebSocket. Multiple browser tabs can connect simultaneously and all receive the same live data. If the connection drops, the dashboard reconnects automatically.
+
+To stop a running test, click **Stop** in the sidebar or press `Ctrl+C` in the terminal — a partial report is saved either way.
+
+---
+
+## Running — CLI Mode
 
 ```bash
 python3 validator.py
 ```
 
-The tool will prompt you for configuration interactively:
+The tool prompts for configuration interactively:
 
 | Prompt | Description |
 |---|---|
@@ -84,7 +112,7 @@ After entering values you will see a configuration summary and must type `yes` t
 
 ---
 
-## Example
+## CLI Example
 
 ```
 ====================================================
@@ -103,21 +131,19 @@ Cooldown between stages (seconds): 15
 ===================================
  TEST CONFIGURATION
 ===================================
-Target               : https://scrubbing.client-infra.com
-Initial Users        : 50
-Ramp Increment       : 50
-Maximum Users        : 200
-Stage Duration       : 30s
-Timeout              : 10s
-Cooldown             : 15s
+target               : https://scrubbing.client-infra.com
+start_users          : 50
+ramp_step            : 50
+max_users            : 200
+stage_duration_s     : 30
+timeout_s            : 10
+cooldown_s           : 15
 
 Proceed with validation? (yes/no): yes
 
-===================================
- RUNNING STAGE: 50 CONCURRENT USERS
-===================================
+[>] Stage starting — 50 concurrent users
 
-Stage completed in 30.04s
+  Live — 312 reqs | 52.0 RPS
 
 === STAGE RESULTS ===
 Total Requests      : 4821
@@ -131,17 +157,11 @@ p95 Latency         : 0.741s
 p99 Latency         : 1.102s
 Max Latency         : 2.317s
 
-Cooling down for 15 seconds...
+[>] Cooling down for 15s...
 
-===================================
- RUNNING STAGE: 100 CONCURRENT USERS
-===================================
+[>] Stage starting — 100 concurrent users
 ...
-```
 
-At the end of the test (or on `Ctrl+C`), a full JSON report is saved:
-
-```
 Report saved → scrubbing_report_20260514_143022.json
 ```
 
@@ -149,7 +169,7 @@ Report saved → scrubbing_report_20260514_143022.json
 
 ## Report File
 
-Each test run generates a timestamped JSON file in the working directory, e.g. `scrubbing_report_20260514_143022.json`.
+Each test run generates a timestamped JSON file in the working directory, e.g. `scrubbing_report_20260514_143022.json`. The file is written after every stage, so partial results are preserved if the test is interrupted.
 
 ```json
 {
@@ -179,16 +199,30 @@ Each test run generates a timestamped JSON file in the working directory, e.g. `
       "max_latency_s": 2.317
     }
   ],
-  "final_totals": { ... },
+  "final_totals": { "..." },
   "completed_at": "2026-05-14T14:35:47.813201"
 }
 ```
 
-The report is written after every stage, so partial results are preserved if the test is interrupted.
+Reports can be downloaded directly from the web dashboard's Reports section.
 
 ---
 
-## Live Monitoring (during test)
+## Project Structure
+
+```
+dos-sim/
+├── validator.py       # Core async load testing engine + CLI entry point
+├── server.py          # FastAPI web server + WebSocket live update handler
+├── requirements.txt   # Python dependencies
+├── setup.py           # Bash setup script for Ubuntu/Linux
+└── static/
+    └── index.html     # Single-page web dashboard (Chart.js + Tailwind)
+```
+
+---
+
+## Live Terminal Monitoring (during CLI mode)
 
 Open a second terminal and use:
 
@@ -206,7 +240,7 @@ netstat -ant | wc -l    # Total active connections
 | Metric | What it tells you |
 |---|---|
 | RPS | Throughput — whether the scrubbing center is throttling traffic |
-| p95 / p99 latency | Real-world latency under load (more reliable than max) |
-| Timeouts | Requests that exceeded the HTTP timeout — scrubber may be dropping or delaying |
-| Connection Errors | TCP-level failures — scrubber may be refusing connections |
-| Server Errors | HTTP 5xx responses — backend is degrading under load |
+| p95 / p99 latency | Real-world latency under load (more reliable than raw max) |
+| Timeouts | Requests exceeding the HTTP timeout — scrubber may be dropping or delaying |
+| Connection Errors | TCP-level failures — scrubber may be refusing connections at scale |
+| Server Errors | HTTP 5xx responses — backend degrading under load |
