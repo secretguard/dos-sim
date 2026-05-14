@@ -30,16 +30,12 @@ chmod +x setup.py
 sudo bash setup.py
 ```
 
-This installs:
-- `python3`, `python3-pip`
+This installs system dependencies and creates an isolated Python virtual environment named `dos-sim` with all required packages inside it — no system Python packages are touched.
+
+Installed:
+- `python3`, `python3-pip`, `python3-venv`
 - `htop`, `iftop`, `net-tools`, `curl` (for terminal monitoring)
-- Python packages: `aiohttp`, `fastapi`, `uvicorn`
-
-### 3. Manual install (alternative)
-
-```bash
-pip3 install -r requirements.txt
-```
+- Python packages inside the venv: `aiohttp`, `fastapi`, `uvicorn`
 
 ---
 
@@ -64,13 +60,27 @@ Unauthorized use against third-party systems is illegal and unethical.
 
 ## Running — Web Dashboard (recommended)
 
-Launch the web server:
+Launch the dashboard:
 
 ```bash
-python server.py
+python3 start.py
 ```
 
-Then open **http://localhost:8000** in your browser.
+The script automatically uses the virtual environment created by setup. It prints the URLs to open:
+
+```
+======================================================
+  ISP SCRUBBING VALIDATOR
+======================================================
+
+  Dashboard URL:
+    http://localhost:8000
+    http://192.168.1.x:8000   <- share this with the client
+
+  Press Ctrl+C to stop.
+```
+
+Then open the printed URL in your browser.
 
 The dashboard provides:
 
@@ -212,10 +222,11 @@ Reports can be downloaded directly from the web dashboard's Reports section.
 
 ```
 dos-sim/
-├── validator.py       # Core async load testing engine + CLI entry point
+├── setup.py           # Bash setup script — creates venv + installs deps
+├── start.py           # Start the dashboard (auto-uses venv, prints URL)
 ├── server.py          # FastAPI web server + WebSocket live update handler
+├── validator.py       # Core async load testing engine + CLI entry point
 ├── requirements.txt   # Python dependencies
-├── setup.py           # Bash setup script for Ubuntu/Linux
 └── static/
     └── index.html     # Single-page web dashboard (Chart.js + Tailwind)
 ```
