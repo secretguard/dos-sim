@@ -30,7 +30,7 @@ chmod +x setup.py
 sudo bash setup.py
 ```
 
-This installs system dependencies and creates an isolated Python virtual environment named `dos-sim` with all required packages inside it — no system Python packages are touched.
+This installs system dependencies and creates an isolated Python virtual environment named `dos-sim` with all required packages inside it
 
 Installed:
 - `python3`, `python3-pip`, `python3-venv`
@@ -39,12 +39,7 @@ Installed:
 
 ---
 
-## Permissions
-
-This tool must only be used when:
-
-- You **own** the target infrastructure, or
-- You have **explicit written authorization** from the target owner
+## Identifying communnication from this tool
 
 Every HTTP request includes the following headers to identify it as authorized testing traffic:
 
@@ -53,10 +48,6 @@ User-Agent: Authorized-ISP-Scrubbing-Validation
 X-Test-Type: ScrubbingVerification
 X-Worker-ID: <worker-number>
 ```
-
-Unauthorized use against third-party systems is illegal and unethical.
-
----
 
 ## Running — Web Dashboard (recommended)
 
@@ -99,6 +90,15 @@ The server streams updates over WebSocket. Multiple browser tabs can connect sim
 To stop a running test, click **Stop** in the sidebar or press `Ctrl+C` in the terminal — a partial report is saved either way.
 
 ---
+## Metrics Reference
+
+| Metric | What it tells you |
+|---|---|
+| RPS | Throughput — whether the scrubbing center is throttling traffic |
+| p95 / p99 latency | Real-world latency under load (more reliable than raw max) |
+| Timeouts | Requests exceeding the HTTP timeout — scrubber may be dropping or delaying |
+| Connection Errors | TCP-level failures — scrubber may be refusing connections at scale |
+| Server Errors | HTTP 5xx responses — backend degrading under load |
 
 ## Running — CLI Mode
 
@@ -245,13 +245,3 @@ netstat -ant | wc -l    # Total active connections
 ```
 
 ---
-
-## Metrics Reference
-
-| Metric | What it tells you |
-|---|---|
-| RPS | Throughput — whether the scrubbing center is throttling traffic |
-| p95 / p99 latency | Real-world latency under load (more reliable than raw max) |
-| Timeouts | Requests exceeding the HTTP timeout — scrubber may be dropping or delaying |
-| Connection Errors | TCP-level failures — scrubber may be refusing connections at scale |
-| Server Errors | HTTP 5xx responses — backend degrading under load |
