@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ISP Scrubbing Validator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <style>
+    body { background: #0b0e1a; font-family: 'Courier New', monospace; }
+    .card { background: #111827; border: 1px solid #1f2937; border-radius: 0.5rem; padding: 1rem; }
+    .chart-wrap { position: relative; height: 220px; }
+    .kpi-val { font-size: 1.75rem; font-weight: 700; line-height: 1; }
+    .kpi-label { font-size: 0.7rem; color: #6b7280; text-transform: uppercase; letter-spacing: 0.08em; margin-top: 0.25rem; }
+    #log { background: #0b0e1a; border: 1px solid #1f2937; border-radius: 0.375rem; height: 10rem; overflow-y: auto; padding: 0.5rem 0.75rem; font-size: 0.75rem; }
+    .log-line { padding: 1px 0; border-bottom: 1px solid #111827; }
+    .log-line.err { color: #f87171; }
+    .log-line.ok  { color: #4ade80; }
+    .log-line.inf { color: #94a3b8; }
+    input[type=number], input[type=text] {
+      background: #0b0e1a; border: 1px solid #1f2937; color: #e2e8f0;
+      border-radius: 0.25rem; padding: 0.3rem 0.5rem; width: 100%; font-size: 0.8rem;
+    }
+    input:focus { outline: 1px solid #6366f1; }
+    label { font-size: 0.72rem; color: #9ca3af; display: block; margin-bottom: 2px; }
+    ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #374151; border-radius: 2px; }
+    .badge { display: inline-flex; align-items: center; gap: 4px; font-size: 0.7rem; padding: 2px 8px; border-radius: 9999px; }
+    .badge-dot { width: 7px; height: 7px; border-radius: 50%; }
+  </style>
+</head>
+<body class="text-slate-200 min-h-screen">
+
+  <!-- Header -->
+  <header class="flex items-center justify-between px-5 py-3 border-b border-gray-800" style="background:#0d1020">
+    <div class="flex items-center gap-3">
+      <span class="text-indigo-400 font-bold tracking-widest text-sm">&#9632; ISP SCRUBBING VALIDATOR</span>
+      <span id="statusBadge" class="badge bg-gray-800 text-gray-400">
+        <span class="badge-dot bg-gray-500" id="statusDot"></span>
+        <span id="statusText">Disconnected</span>
+      </span>
+    </div>
+    <div id="testBadge" class="badge bg-gray-800 text-gray-500">IDLE</div>
+  </header>
+
+  <div class="flex" style="height:calc(100vh - 49px)">
+
+    <!-- ── Sidebar ── -->
+    <aside class="flex flex-col border-r border-gray-800 overflow-y-auto" style="width:260px;min-width:260px;background:#0d1020;padding:1rem">
+      <p class="text-xs text-gray-500 uppercase tracking-widest mb-3">Configuration</p>
+
+      <div class="space-y-2" id="configFields">
+        <div>
+          <label>Target URL</label>
+          <input type="text" id="f_target" placeholder="https://target.example.com" value="https://" />
+        </div>
+        <div>
+          <label>Initial Users</label>
+          <input type="number" id="f_start_users" value="10" min="1" />
+        </div>
+        <div>
+          <label>Ramp Increment</label>
+          <input type="number" id="f_ramp_step" value="10" min="1" />
+        </div>
+        <div>
+          <label>Max Users</label>
+          <input type="number" id="f_max_users" value="50" min="1" />
+        </div>
+        <div>
+          <label>Stage Duration (s)</label>
+          <input type="number" id="f_stage_duration_s" value="30" min="1" />
+        </div>
+        <div>
+          <label>HTTP Timeout (s)</label>
+          <input type="number" id="f_timeout_s" value="10" min="1" />
+        </div>
+        <div>
+          <label>Cooldown (s)</label>
+          <input type="number" id="f_cooldown_s" value="10" min="0" />
+        </div>
+      </div>
+
+      <!-- Progress -->
+      <div class="mt-4">
+        <div class="flex justify-between text-xs text-gray-500 mb-1">
+          <span>Progress</span>
+          <span id="progressLabel">—</span>
+        </div>
+        <div class="w-full rounded-full" style="height:4px;background:#1f2937">
+          <div id="progressBar" class="rounded-full" style="height:4px;width:0%;background:#6366f1;transition:width 0.4s"></div>
+        </div>
+      </div>
+
+      <div class="mt-4 space-y-2">
+        <button id="btnStart" onclick="startTest()"
+          class="w-full py-2 rounded text-sm font-bold tracking-wide"
+          style="background:#4f46e5;color:#fff">
+          ▶ START TEST
+        </button>
+        <button id="btnStop" onclick="stopTest()" disabled
+          class="w-full py-2 rounded text-sm font-bold tracking-wide opacity-40"
+          style="background:#991b1b;color:#fff">
+          ■ STOP
+        </button>
+      </div>
+
+      <div class="mt-auto pt-4 text-xs text-gray-600 leading-relaxed">
+        Authorized infrastructure testing only.<br>
+        Results saved as JSON in the working directory.
+      </div>
+    </aside>
+
+    <!-- ── Main ── -->
+    <main class="flex-1 overflow-y-auto p-4 space-y-4">
+
+      <!-- KPI cards -->
+      <div class="grid grid-cols-4 gap-3">
+        <div class="card text-center">
+          <div class="kpi-val text-indigo-400" id="kStage">—</div>
+          <div class="kpi-label">Current Stage</div>
+        </div>
+        <div class="card text-center">
+          <div class="kpi-val text-green-400" id="kRps">—</div>
+          <div class="kpi-label">Requests / sec</div>
+        </div>
+        <div class="card text-center">
+          <div class="kpi-val text-red-400" id="kErr">—</div>
+          <div class="kpi-label">Error Rate</div>
+        </div>
+        <div class="card text-center">
+          <div class="kpi-val text-yellow-400" id="kP99">—</div>
+          <div class="kpi-label">p99 Latency</div>
+        </div>
+      </div>
+
+      <!-- Charts row 1 -->
+      <div class="grid grid-cols-2 gap-3">
+        <div class="card">
+          <p class="text-xs text-gray-500 mb-2 uppercase tracking-widest">Requests / sec — per stage</p>
+          <div class="chart-wrap"><canvas id="rpsChart"></canvas></div>
+        </div>
+        <div class="card">
+          <p class="text-xs text-gray-500 mb-2 uppercase tracking-widest">Latency — avg / p95 / p99 (s)</p>
+          <div class="chart-wrap"><canvas id="latencyChart"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Charts row 2 -->
+      <div class="grid grid-cols-2 gap-3">
+        <div class="card">
+          <p class="text-xs text-gray-500 mb-2 uppercase tracking-widest">Concurrent users — ramp</p>
+          <div class="chart-wrap"><canvas id="usersChart"></canvas></div>
+        </div>
+        <div class="card">
+          <p class="text-xs text-gray-500 mb-2 uppercase tracking-widest">Request breakdown — per stage</p>
+          <div class="chart-wrap"><canvas id="breakdownChart"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Live log -->
+      <div class="card">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-xs text-gray-500 uppercase tracking-widest">Live Log</p>
+          <button onclick="clearLog()" class="text-xs text-gray-600 hover:text-gray-400">clear</button>
+        </div>
+        <div id="log"></div>
+      </div>
+
+      <!-- Reports -->
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <p class="text-xs text-gray-500 uppercase tracking-widest">Saved Reports</p>
+          <button onclick="ws.send(JSON.stringify({type:'list_reports'}))"
+            class="text-xs text-indigo-400 hover:text-indigo-300">↻ Refresh</button>
+        </div>
+        <div id="reportsTable" class="text-xs text-gray-500">No reports yet.</div>
+      </div>
+
+    </main>
+  </div>
+
+<script>
+// ── Chart setup ──────────────────────────────────────────────
+const BASE = {
+  responsive: true,
+  maintainAspectRatio: false,
+  animation: { duration: 300 },
+  plugins: {
+    legend: { labels: { color: '#6b7280', font: { family: 'Courier New', size: 11 }, boxWidth: 12 } },
+    tooltip: { backgroundColor: '#111827', borderColor: '#374151', borderWidth: 1, titleFont: { family: 'Courier New' }, bodyFont: { family: 'Courier New' } }
+  },
+  scales: {
+    x: { ticks: { color: '#4b5563', font: { family: 'Courier New', size: 10 } }, grid: { color: '#1a2035' } },
+    y: { ticks: { color: '#4b5563', font: { family: 'Courier New', size: 10 } }, grid: { color: '#1a2035' }, beginAtZero: true }
+  }
+}
+
+function mkChart(id, type, datasets, extraOpts = {}) {
+  return new Chart(document.getElementById(id), {
+    type,
+    data: { labels: [], datasets },
+    options: Object.assign({}, BASE, extraOpts)
+  })
+}
+
+const rpsChart = mkChart('rpsChart', 'line', [{
+  label: 'RPS', data: [], borderColor: '#818cf8', backgroundColor: 'rgba(99,102,241,0.15)',
+  fill: true, tension: 0.35, pointRadius: 4, pointBackgroundColor: '#818cf8'
+}])
+
+const latencyChart = mkChart('latencyChart', 'line', [
+  { label: 'Avg',  data: [], borderColor: '#34d399', tension: 0.35, pointRadius: 3, pointBackgroundColor: '#34d399' },
+  { label: 'p95',  data: [], borderColor: '#fbbf24', tension: 0.35, pointRadius: 3, pointBackgroundColor: '#fbbf24' },
+  { label: 'p99',  data: [], borderColor: '#f87171', tension: 0.35, pointRadius: 3, pointBackgroundColor: '#f87171' },
+])
+
+const usersChart = mkChart('usersChart', 'bar', [{
+  label: 'Concurrent Users', data: [],
+  backgroundColor: 'rgba(99,102,241,0.6)', borderColor: '#6366f1', borderWidth: 1
+}])
+
+const breakdownChart = mkChart('breakdownChart', 'bar', [
+  { label: 'Success',    data: [], backgroundColor: 'rgba(52,211,153,0.75)' },
+  { label: 'Srv Errors', data: [], backgroundColor: 'rgba(251,146,60,0.75)' },
+  { label: 'Timeouts',   data: [], backgroundColor: 'rgba(251,191,36,0.75)' },
+  { label: 'Conn Errors',data: [], backgroundColor: 'rgba(156,163,175,0.5)' },
+], { scales: { ...BASE.scales, x: { ...BASE.scales.x, stacked: true }, y: { ...BASE.scales.y, stacked: true } } })
+
+function pushToChart(chart, label, values) {
+  chart.data.labels.push(label)
+  values.forEach((v, i) => chart.data.datasets[i].data.push(v))
+  chart.update()
+}
+
+function resetCharts() {
+  [rpsChart, latencyChart, usersChart, breakdownChart].forEach(c => {
+    c.data.labels = []
+    c.data.datasets.forEach(ds => ds.data = [])
+    c.update()
+  })
+}
+
+// ── State ────────────────────────────────────────────────────
+let stagesDone = 0
+let totalStages = 0
+
+function calcTotalStages() {
+  const su = +document.getElementById('f_start_users').value
+  const rs = +document.getElementById('f_ramp_step').value
+  const mu = +document.getElementById('f_max_users').value
+  return Math.ceil((mu - su) / rs) + 1
+}
+
+function setRunning(running) {
+  const btnStart = document.getElementById('btnStart')
+  const btnStop  = document.getElementById('btnStop')
+  const badge    = document.getElementById('testBadge')
+  document.querySelectorAll('#configFields input').forEach(el => el.disabled = running)
+  btnStart.disabled = running
+  btnStart.style.opacity = running ? '0.4' : '1'
+  btnStop.disabled = !running
+  btnStop.style.opacity = running ? '1' : '0.4'
+  badge.textContent = running ? '● RUNNING' : 'IDLE'
+  badge.style.color = running ? '#4ade80' : '#6b7280'
+  badge.style.background = running ? '#14532d33' : '#1f293799'
+}
+
+function updateProgress() {
+  const pct = totalStages > 0 ? Math.round((stagesDone / totalStages) * 100) : 0
+  document.getElementById('progressBar').style.width = pct + '%'
+  document.getElementById('progressLabel').textContent =
+    totalStages > 0 ? `${stagesDone} / ${totalStages}` : '—'
+  document.getElementById('kStage').textContent =
+    stagesDone > 0 ? `${stagesDone}/${totalStages}` : '—'
+}
+
+function updateKPIs(d) {
+  document.getElementById('kRps').textContent = d.rps ?? '—'
+  const errors = (d.server_errors ?? 0) + (d.timeouts ?? 0) + (d.connection_errors ?? 0)
+  const total  = d.total_requests ?? 0
+  const errPct = total > 0 ? ((errors / total) * 100).toFixed(1) + '%' : '—'
+  document.getElementById('kErr').textContent = errPct
+  document.getElementById('kP99').textContent = d.p99_latency_s != null ? d.p99_latency_s + 's' : '—'
+}
+
+// ── Log ──────────────────────────────────────────────────────
+function appendLog(msg, cls = 'inf') {
+  const div = document.getElementById('log')
+  const line = document.createElement('div')
+  line.className = `log-line ${cls}`
+  const ts = new Date().toTimeString().slice(0, 8)
+  line.textContent = `[${ts}] ${msg}`
+  div.appendChild(line)
+  div.scrollTop = div.scrollHeight
+}
+function clearLog() { document.getElementById('log').innerHTML = '' }
+
+// ── Reports ──────────────────────────────────────────────────
+function renderReports(files) {
+  const el = document.getElementById('reportsTable')
+  if (!files || files.length === 0) {
+    el.innerHTML = '<span class="text-gray-600">No reports yet.</span>'
+    return
+  }
+  const rows = files.map(f => {
+    const kb  = (f.size / 1024).toFixed(1)
+    const dt  = new Date(f.mtime * 1000).toLocaleString()
+    return `<tr class="border-t border-gray-800 hover:bg-gray-900">
+      <td class="py-1 pr-4 text-indigo-300">${f.name}</td>
+      <td class="py-1 pr-4 text-gray-500">${kb} KB</td>
+      <td class="py-1 pr-4 text-gray-500">${dt}</td>
+      <td class="py-1"><a href="/api/reports/${encodeURIComponent(f.name)}" download
+        class="text-indigo-400 hover:underline">⬇ download</a></td>
+    </tr>`
+  }).join('')
+  el.innerHTML = `<table class="w-full"><thead><tr class="text-gray-600">
+    <th class="text-left py-1 pr-4 font-normal">File</th>
+    <th class="text-left py-1 pr-4 font-normal">Size</th>
+    <th class="text-left py-1 pr-4 font-normal">Time</th>
+    <th class="text-left py-1 font-normal"></th>
+  </tr></thead><tbody>${rows}</tbody></table>`
+}
+
+// ── WebSocket ────────────────────────────────────────────────
+let ws
+let reconnectDelay = 1000
+
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws`)
+
+  ws.onopen = () => {
+    reconnectDelay = 1000
+    document.getElementById('statusDot').style.background = '#4ade80'
+    document.getElementById('statusText').textContent = 'Connected'
+    ws.send(JSON.stringify({ type: 'list_reports' }))
+    appendLog('Connected to server.', 'ok')
+  }
+
+  ws.onclose = () => {
+    document.getElementById('statusDot').style.background = '#ef4444'
+    document.getElementById('statusText').textContent = 'Disconnected'
+    appendLog(`Disconnected — retrying in ${reconnectDelay / 1000}s…`, 'err')
+    setTimeout(connect, reconnectDelay)
+    reconnectDelay = Math.min(reconnectDelay * 2, 16000)
+  }
+
+  ws.onerror = () => ws.close()
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data)
+
+    switch (msg.type) {
+      case 'log':
+        appendLog(msg.message, 'inf')
+        break
+
+      case 'stage_update':
+        updateKPIs(msg.data)
+        break
+
+      case 'stage_complete': {
+        stagesDone++
+        updateProgress()
+        updateKPIs(msg.data)
+        const d = msg.data
+        const lbl = `${d.concurrent_users}u`
+        pushToChart(rpsChart,       lbl, [d.rps])
+        pushToChart(latencyChart,   lbl, [d.avg_latency_s, d.p95_latency_s, d.p99_latency_s])
+        pushToChart(usersChart,     lbl, [d.concurrent_users])
+        pushToChart(breakdownChart, lbl, [d.success, d.server_errors, d.timeouts, d.connection_errors])
+        appendLog(`Stage done — ${d.concurrent_users} users | ${d.rps} RPS | p99 ${d.p99_latency_s}s`, 'ok')
+        break
+      }
+
+      case 'test_complete':
+        setRunning(false)
+        updateKPIs(msg.final)
+        appendLog(`Test complete. Report → ${msg.report_file}`, 'ok')
+        ws.send(JSON.stringify({ type: 'list_reports' }))
+        break
+
+      case 'error':
+        appendLog(`ERROR: ${msg.message}`, 'err')
+        setRunning(false)
+        break
+
+      case 'reports_list':
+        renderReports(msg.files)
+        break
+    }
+  }
+}
+
+// ── Controls ─────────────────────────────────────────────────
+function startTest() {
+  const config = {
+    target:          document.getElementById('f_target').value.trim(),
+    start_users:     +document.getElementById('f_start_users').value,
+    ramp_step:       +document.getElementById('f_ramp_step').value,
+    max_users:       +document.getElementById('f_max_users').value,
+    stage_duration_s:+document.getElementById('f_stage_duration_s').value,
+    timeout_s:       +document.getElementById('f_timeout_s').value,
+    cooldown_s:      +document.getElementById('f_cooldown_s').value,
+  }
+
+  stagesDone = 0
+  totalStages = calcTotalStages()
+  updateProgress()
+  resetCharts()
+
+  ;['kRps','kErr','kP99'].forEach(id => document.getElementById(id).textContent = '—')
+
+  setRunning(true)
+  ws.send(JSON.stringify({ type: 'start', config }))
+  appendLog(`Test started — target: ${config.target}`, 'ok')
+}
+
+function stopTest() {
+  ws.send(JSON.stringify({ type: 'stop' }))
+  setRunning(false)
+}
+
+connect()
+</script>
+</body>
+</html>
